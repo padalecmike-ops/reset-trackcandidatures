@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrackCandidatures — Nouveau mot de passe</title>
+<style>
+  :root { --ok:#10b981; --err:#ef4444; --txt:#0f172a; --mut:#64748b; --bd:#e2e8f0; --brand:#2563eb; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; display:grid; place-items:center; padding:20px;
+    font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:#f1f5f9; color:var(--txt);
+  }
+  .card {
+    background:#fff; width:100%; max-width:420px; padding:32px;
+    border-radius:14px; box-shadow:0 10px 40px rgba(15,23,42,.10);
+  }
+  h1 { margin:0 0 4px; font-size:1.35rem; }
+  .sub { margin:0 0 22px; color:var(--mut); font-size:.92rem; }
+  label {
+    display:block; font-size:.76rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--mut); margin:16px 0 6px;
+  }
+  input {
+    width:100%; padding:11px 13px; font-size:1rem; border:1px solid var(--bd);
+    border-radius:8px; background:#fff; color:var(--txt);
+  }
+  input:focus { outline:2px solid var(--brand); outline-offset:1px; border-color:var(--brand); }
+  button {
+    width:100%; margin-top:22px; padding:12px; font-size:1rem; font-weight:650;
+    color:#fff; background:var(--brand); border:0; border-radius:8px; cursor:pointer;
+  }
+  button:hover:not(:disabled) { background:#1d4ed8; }
+  button:disabled { opacity:.55; cursor:not-allowed; }
+  .msg { margin-top:16px; padding:11px 13px; border-radius:8px; font-size:.9rem; display:none; }
+  .msg.err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; display:block; }
+  .msg.ok  { background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; display:block; }
+  .foot { margin-top:22px; padding-top:16px; border-top:1px solid var(--bd);
+          color:var(--mut); font-size:.8rem; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Nouveau mot de passe</h1>
+  <p class="sub">TrackCandidatures</p>
+
+  <form id="f" autocomplete="off">
+    <label for="p1">Mot de passe</label>
+    <input id="p1" type="password" minlength="6" required placeholder="6 caractères minimum">
+    <label for="p2">Confirmer</label>
+    <input id="p2" type="password" minlength="6" required placeholder="••••••••">
+    <button id="go" type="submit">Enregistrer le mot de passe</button>
+  </form>
+
+  <div class="msg" id="m"></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script type="module">
+// Page de reinitialisation TrackCandidatures.
+//
+// Elle recoit le lien de Supabase, qui peut se presenter sous deux formes :
+//   ?code=...            flux PKCE  -> echangeCodeForSession
+//   #access_token=...    flux implicite -> setSession
+// Puis on applique le nouveau mot de passe avec updateUser.
+
+const PROJECT_URL = 'https://epspmcwknvmsndksuutc.supabase.co';
+const ANON_KEY    = 'sb_publishable_GuWaiuvXEBBd7tXCSFFQQQ_7_dXWtki';
+
+const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+const sb = createClient(PROJECT_URL, ANON_KEY);
+
+const m    = document.getElementById('m');
+const f    = document.getElementById('f');
+const btn  = document.getElementById('go');
+const foot = document.getElementById('foot');
+
+function say(text, kind) { m.textContent = text; m.className = 'msg ' + kind; }
+
+const q     = new URLSearchParams(location.search);
+const frag  = new URLSearchParams(location.hash.replace(/^#/, ''));
+const code  = q.get('code');
+const atok  = frag.get('access_token') || q.get('access_token');
+const thash = q.get('token_hash')   || frag.get('token_hash');
+const err   = q.get('error_description') || q.get('error');
+
+if (err) {
+  say(decodeURIComponent(err.replace(/\+/g, ' ')), 'err');
+  btn.disabled = true;
+} else if (code || atok || thash) {
+  say('Lien reçu. Choisissez votre nouveau mot de passe.', 'ok');
+} else {
+  say("Lien invalide ou expiré. Demandez un nouveau code depuis l'application.", 'err');
+  btn.disabled = true;
+}
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const p1 = document.getElementById('p1').value;
+  const p2 = document.getElementById('p2').value;
+
+  if (p1.length < 6) { say('Mot de passe : 6 caractères minimum.', 'err'); return; }
+  if (p1 !== p2)    { say('Les deux mots de passe ne correspondent pas.', 'err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Enregistrement…';
+  say('Vérification du lien…', 'ok');
+
+  try {
+    let session = null;
+
+    if (code) {
+      const r = await sb.auth.exchangeCodeForSession(code);
+      if (r.error) throw new Error(r.error.message);
+      session = r.data.session;
+    } else if (atok) {
+      const r = await sb.auth.setSession({
+        access_token: atok,
+        refresh_token: frag.get('refresh_token') || '',
+      });
+      if (r.error) throw new Error(r.error.message);
+      session = r.data.session;
+    } else if (thash) {
+      const r = await sb.auth.verifyOtp({ token_hash: thash, type: 'recovery' });
+      if (r.error) throw new Error(r.error.message);
+      session = r.data.session;
+    }
+
+    if (!session) throw new Error("Session de récupération introuvable.");
+
+    const u = await sb.auth.updateUser({ password: p1 });
+    if (u.error) throw new Error(u.error.message);
+
+    await sb.auth.signOut();
+    say('Mot de passe mis à jour. Vous pouvez rouvrir TrackCandidatures.', 'ok');
+    f.style.display = 'none';
+    foot.style.display = 'block';
+    foot.textContent = 'Fermez cette page.';
+  } catch (ex) {
+    say((ex && ex.message) || 'Échec. Le lien a peut-être expiré.', 'err');
+    btn.disabled = false;
+    btn.textContent = 'Réessayer';
+  }
+});
+</script>
+</body>
+</html>
